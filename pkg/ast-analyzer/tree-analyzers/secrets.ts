@@ -1,5 +1,5 @@
 import { AnalyzerMatch, AnalyzerParams } from "../types";
-import { Visitor } from "../walker";
+import { Visitor } from "@babel/traverse";
 
 // Define the patterns for secrets detection
 
@@ -5737,10 +5737,9 @@ const secretsAnalyzerBuilder = (
   matchesReturn: AnalyzerMatch[]
 ): Visitor => {
   return {
-    Literal(node, ancestors) {
-      if (!node.loc || typeof node.value !== "string") {
-        return;
-      }
+    StringLiteral(path) {
+      const node = path.node
+      if (!node.loc || node.start == null || node.end == null) return;
 
       for (const pattern of SECRET_PATTERNS) {
         if (pattern.regex.test(node.value)) {

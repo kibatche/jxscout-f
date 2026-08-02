@@ -1,25 +1,24 @@
-import { Node } from "acorn";
-import { Analyzer, AnalyzerMatch, AnalyzerParams } from "../types";
-import { Visitor } from "../walker";
+import { AnalyzerMatch, AnalyzerParams } from "../types";
+import { Visitor } from "@babel/traverse";
+import * as t from "@babel/types";
 
 export const INNER_HTML_ANALYZER_NAME = "inner-html";
 
-const innerHtmlAnalyzerBuilder = (
+const innerHTMLAnalyzerBuilder = (
   args: AnalyzerParams,
   matchesReturn: AnalyzerMatch[]
 ): Visitor => {
   return {
-    AssignmentExpression(node, ancestors) {
-      if (!node.loc) {
-        return;
-      }
+    AssignmentExpression(path) {
+      const node = path.node;
+      if (!node.loc || node.start == null || node.end == null) return;
 
-      // Check if this is an innerHTML assignment
-      if (
-        node.left.type === "MemberExpression" &&
-        node.left.property.type === "Identifier" &&
-        node.left.property.name === "innerHTML"
-      ) {
+      const left = node.left
+      if (!t.isMemberExpression(left) && !t.isOptionalMemberExpression(left)) return;
+      const isInnerHTMLAssignment = (
+        ((t.isIdentifier(left.property, { name: "innerHTML" }) && !left.computed) || t.isStringLiteral(left.property, { value: "innerHTML" })))
+
+      if (isInnerHTMLAssignment) {
         const match: AnalyzerMatch = {
           filePath: args.filePath,
           analyzerName: INNER_HTML_ANALYZER_NAME,
@@ -37,4 +36,4 @@ const innerHtmlAnalyzerBuilder = (
   };
 };
 
-export { innerHtmlAnalyzerBuilder };
+export { innerHTMLAnalyzerBuilder };

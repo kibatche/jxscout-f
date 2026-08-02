@@ -22,7 +22,7 @@ Le corpus et les captures vivent **hors du dépôt**, sous `~/jxscout-regression
 
 ```
 ~/jxscout-regression/
-├── corpus/      24 bundles figés, copiés depuis ~/jxscout et jamais modifiés
+├── corpus/      23 bundles figés, copiés depuis ~/jxscout et jamais modifiés
 ├── baseline/    la capture de référence : un JSON par bundle + manifest.json
 └── MANIFEST.md  la liste du corpus, avec tailles et empreintes
 ```
@@ -48,6 +48,21 @@ Ce qui compte est la règle de sélection, pour pouvoir en constituer un compara
    (jusqu'à 13 Mo), le percentile 10 donne les petits chunks où un bug de position se voit tout
    de suite.
 3. **Le programme `default` est exclu** : ses fichiers sont des doublons de `sncf-connect`.
+4. **Les fichiers qui ne sont pas du JavaScript sont écartés, quelle que soit leur extension.**
+   Point important, et une erreur commise à la première construction du corpus : sélectionner par
+   `find -name '*.js'` **ne reproduit pas** le critère de jxscout. Celui-ci ne regarde jamais
+   l'extension de l'URL — `common.DetectContentType` renifle le **contenu** avec
+   `http.DetectContentType`, et `isJavaScriptAsset()` (`internal/modules/ast-analyzer/module.go:228`)
+   ne laisse passer que `ContentTypeJS` ou du JS inline. Un chunk dont l'URL finit en `.js` mais
+   dont le serveur a renvoyé le fallback SPA — donc `<!doctype html>` — est classé HTML et n'est
+   **jamais** soumis à l'analyzer. Le corpus en contenait un ; il a été retiré, d'où 23 fichiers
+   et non 24. Vérification, à refaire si le corpus est reconstitué :
+
+   ```bash
+   for f in ~/jxscout-regression/corpus/*.js; do
+     case "$(file -b --mime-type "$f")" in *html*|*xml*) echo "à retirer : $f";; esac
+   done
+   ```
 
 Le résultat couvre quatre chaînes de build différentes — Vite (Easyship), Next.js
 (SNCF Connect), Svelte (Radio France), webpack (Infomaniak, Inria) — ce qui est le vrai
@@ -148,6 +163,6 @@ puisque c'est lui que jxscout exécute.
 
 ## Coût d'un passage
 
-37 secondes pour les 24 fichiers, 14 960 matches au total. Deux fichiers pèsent à eux seuls
-27 des 37 secondes : le bundle kmeet d'Infomaniak (13 Mo, 14,2 s) et le bundle applicatif
-d'Easyship (10,9 Mo, 13,3 s). Tout le reste passe sous les 2,5 secondes.
+Une quarantaine de secondes pour les 23 fichiers, 14 960 matches au total. Deux fichiers pèsent
+à eux seuls les deux tiers du temps : le bundle kmeet d'Infomaniak (13 Mo, ~14 s) et le bundle
+applicatif d'Easyship (10,9 Mo, ~13 s). Tout le reste passe sous les 3 secondes.

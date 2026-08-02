@@ -1,6 +1,6 @@
-import { Node } from "acorn";
-import { Analyzer, AnalyzerMatch, AnalyzerParams } from "../types";
-import { Visitor } from "../walker";
+import { AnalyzerMatch, AnalyzerParams } from "../types";
+import { Visitor } from "@babel/traverse";
+import * as t from "@babel/types";
 
 export const FETCH_OPTIONS_ANALYZER_NAME = "fetch-options";
 
@@ -12,18 +12,19 @@ const fetchOptionsAnalyzerBuilder = (
   matchesReturn: AnalyzerMatch[]
 ): Visitor => {
   return {
-    ObjectExpression(node, ancestors) {
-      if (!node.loc) {
-        return;
-      }
+    ObjectExpression(path) {
+      const node = path.node
+      if (!node.loc || node.start == null || node.end == null) return;
 
       // Get all property names in this object
       const propertyNames = new Set(
-        node.properties
-          .filter(
-            (prop) => prop.type === "Property" && prop.key.type === "Identifier"
-          )
-          .map((prop) => (prop as any).key.name)
+        node.properties.flatMap(
+          (prop) => {
+            if (!t.isObjectProperty(prop) || prop.computed) return [];
+            if (t.isIdentifier(prop.key)) return [prop.key.name];
+            if (t.isStringLiteral(prop.key)) return [prop.key.value];
+            return [];
+          })
       );
 
       // Check if this object has any fetch option properties

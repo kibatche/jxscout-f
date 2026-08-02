@@ -1,6 +1,6 @@
-import { Node } from "acorn";
-import { Analyzer, AnalyzerMatch, AnalyzerParams } from "../types";
-import { Visitor } from "../walker";
+import { IANA_TLD } from "../constant/iana-tld";
+import { AnalyzerMatch, AnalyzerParams } from "../types";
+import { Visitor } from "@babel/traverse";
 
 export const HOSTNAME_ANALYZER_NAME = "hostname";
 
@@ -20,15 +20,15 @@ const hostnameAnalyzerBuilder = (
   matchesReturn: AnalyzerMatch[]
 ): Visitor => {
   return {
-    Literal(node, ancestors) {
-      if (!node.loc || typeof node.value !== "string") {
-        return;
-      }
+    StringLiteral(path) {
+      const node = path.node
+      if (!node.loc || node.start == null || node.end == null) return;
 
       // Check if the string literal matches the hostname pattern
       if (HOSTNAME_REGEX.test(node.value)) {
         let parsedUrl: URL | null = null;
-
+        // ajout d'un vrai check de hostname via la lite IANA. Elimine énormément de bruit.
+        if (!IANA_TLD.has(node.value.split(".").at(-1)?.toUpperCase()!)) return;
         try {
           parsedUrl = new URL(`https://${node.value}`);
         } catch {

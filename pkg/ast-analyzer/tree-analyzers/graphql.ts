@@ -1,5 +1,5 @@
 import { AnalyzerMatch, AnalyzerParams } from "../types";
-import { Visitor } from "../walker";
+import { Visitor } from "@babel/traverse";
 
 // This regex matches the start of GraphQL queries and mutations
 // It allows:
@@ -62,15 +62,12 @@ const graphqlAnalyzerBuilder = (
   matchesReturn: AnalyzerMatch[]
 ): Visitor => {
   return {
-    Literal(node, ancestors) {
-      if (!node.loc || typeof node.value !== "string") {
-        return;
-      }
-
+    StringLiteral(path) {
+      const node = path.node;
+      if (!node.loc) return;
       if (!isValidGraphQLOperation(node.value)) {
         return;
       }
-
       if (GRAPHQL_REGEX.test(node.value)) {
         const match: AnalyzerMatch = {
           filePath: args.filePath,
@@ -101,11 +98,9 @@ const graphqlAnalyzerBuilder = (
         matchesReturn.push(match);
       }
     },
-    TemplateLiteral(node, ancestors) {
-      if (!node.loc) {
-        return;
-      }
-
+    TemplateLiteral(path) {
+      const node = path.node;
+      if (!node.loc || node.start == null || node.end == null) return;
       const rawValue = args.source
         .slice(node.start, node.end)
         .replaceAll("`", "");

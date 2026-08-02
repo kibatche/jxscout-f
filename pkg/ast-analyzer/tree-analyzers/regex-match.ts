@@ -1,6 +1,6 @@
 import { Node } from "acorn";
 import { Analyzer, AnalyzerMatch, AnalyzerParams } from "../types";
-import { Visitor } from "../walker";
+import { Visitor } from "@babel/traverse";
 
 export const REGEX_MATCH_ANALYZER_NAME = "regex-match";
 

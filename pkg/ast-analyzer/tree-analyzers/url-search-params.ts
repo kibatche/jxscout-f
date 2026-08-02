@@ -1,6 +1,6 @@
 import { Node } from "acorn";
 import { Analyzer, AnalyzerMatch, AnalyzerParams } from "../types";
-import { Visitor } from "../walker";
+import { Visitor } from "@babel/traverse";
 
 export const URL_SEARCH_PARAMS_ANALYZER_NAME = "url-search-params";
 

@@ -1,6 +1,6 @@
-import { Node } from "acorn";
-import { Analyzer, AnalyzerMatch, AnalyzerParams } from "../types";
-import { Visitor } from "../walker";
+import { AnalyzerMatch, AnalyzerParams } from "../types";
+import { NodePath, Visitor } from "@babel/traverse";
+import * as t from "@babel/types";
 
 export const COOKIE_ANALYZER_NAME = "cookie";
 
@@ -8,73 +8,75 @@ const cookieAnalyzerBuilder = (
   args: AnalyzerParams,
   matchesReturn: AnalyzerMatch[]
 ): Visitor => {
-  return {
-    AssignmentExpression(node, ancestors) {
-      if (!node.loc) {
-        return;
-      }
+  const handleAssignment = (path: NodePath<t.AssignmentExpression>) => {
+    const node = path.node;
+    if (!node.loc || node.start == null || node.end == null) return;
 
-      // Check for cookie assignments
-      if (
-        node.left.type === "MemberExpression" &&
-        node.left.object.type === "Identifier" &&
-        node.left.object.name === "document" &&
-        node.left.property.type === "Identifier" &&
-        node.left.property.name === "cookie"
-      ) {
-        const match: AnalyzerMatch = {
-          filePath: args.filePath,
-          analyzerName: COOKIE_ANALYZER_NAME,
-          value: args.source.slice(node.start, node.end),
-          start: node.loc.start,
-          end: node.loc.end,
-          tags: {
-            cookie: true,
-            "cookie-assignment": true,
-          },
-        };
+    // On est obligé de faire cela afin de pouvoir accéder à ) node.left.object au cas où on a
+    // whatever.document.cookie = truc.
+    // cookie, dans ce cas, reste une propriété de left, mais par contre document dvient une propriété de l'objet "whatever"
+    // Cela semble inutilement compliqué mais les check de type ts nous obligent à faire cela.
+    const left = node.left
+    if (!t.isMemberExpression(left) && !t.isOptionalMemberExpression(left)) return;
+    const isCookieAssignment = (
+      t.isIdentifier(left.object, { name: "document" })
+      && ((t.isIdentifier(left.property, { name: "cookie" }) && !left.computed)|| t.isStringLiteral(left.property, { value: "cookie" })))
+      ||
+      ((t.isMemberExpression(left.object) || t.isOptionalMemberExpression(left.object))
+        && (t.isIdentifier(left.object.property, { name: "document" }) || t.isStringLiteral(left.object.property, { value: "document" }))
+        && (t.isIdentifier(left.property, { name: "cookie" }) || t.isStringLiteral(left.property, { value: "cookie" })))
 
-        matchesReturn.push(match);
-      }
-    },
-    MemberExpression(node, ancestors) {
-      if (!node.loc) {
-        return;
-      }
+    // un objet quelconque sans nom devinable de type globalScope
 
-      // Skip if this is part of an assignment
-      for (const ancestor of ancestors) {
-        if (
-          ancestor.type === "AssignmentExpression" &&
-          ancestor.left === node
-        ) {
-          return;
-        }
-      }
+    if (isCookieAssignment) {
+      const match: AnalyzerMatch = {
+        filePath: args.filePath,
+        analyzerName: COOKIE_ANALYZER_NAME,
+        value: args.source.slice(node.start, node.end),
+        start: node.loc.start,
+        end: node.loc.end,
+        tags: {
+          cookie: true,
+          "cookie-assignment": true,
+        },
+      };
 
-      // Check for cookie reads
-      if (
-        node.object.type === "Identifier" &&
-        node.object.name === "document" &&
-        node.property.type === "Identifier" &&
-        node.property.name === "cookie"
-      ) {
-        const match: AnalyzerMatch = {
-          filePath: args.filePath,
-          analyzerName: COOKIE_ANALYZER_NAME,
-          value: args.source.slice(node.start, node.end),
-          start: node.loc.start,
-          end: node.loc.end,
-          tags: {
-            cookie: true,
-            "cookie-read": true,
-          },
-        };
+      matchesReturn.push(match);
+    }
+  }
+  const handleMemberExpression = (path: NodePath<t.MemberExpression | t.OptionalMemberExpression>) => {
+    const node = path.node
+    if (!node.loc || node.start == null || node.end == null) return;
 
-        matchesReturn.push(match);
-      }
-    },
-  };
-};
+    // On teste si le parent est une affectation et si le noeud courant est à gauche dudit parent retrouvé
+    if (path.findParent(p => p.isAssignmentExpression() && p.node.left === path.node)) return;
+
+    // Check for cookie reads
+    const isCookieRead =
+      (t.isIdentifier(node.object, { name: "document" })
+        && (t.isIdentifier(node.property, { name: "cookie" }) || t.isStringLiteral(node.property, { value: "cookie" })))
+      || (
+        (t.isMemberExpression(node.object) || t.isOptionalMemberExpression(node.object))
+        && (t.isIdentifier(node.object.property, { name: "document" }) || t.isStringLiteral(node.object.property, { value: "document" }))
+        && (t.isIdentifier(node.property, { name: "cookie" }) || t.isStringLiteral(node.property, { value: "cookie" })))
+
+    if (isCookieRead) {
+      const match: AnalyzerMatch = {
+        filePath: args.filePath,
+        analyzerName: COOKIE_ANALYZER_NAME,
+        value: args.source.slice(node.start, node.end),
+        start: node.loc.start,
+        end: node.loc.end,
+        tags: {
+          cookie: true,
+          "cookie-read": true,
+        },
+      };
+
+      matchesReturn.push(match);
+    }
+  }
+  return { AssignmentExpression: handleAssignment, MemberExpression: handleMemberExpression, OptionalMemberExpression: handleMemberExpression }
+}
 
 export { cookieAnalyzerBuilder };

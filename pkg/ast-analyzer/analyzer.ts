@@ -1,6 +1,11 @@
 import fs from "fs";
-import { ParseResult, parseSync } from "oxc-parser";
-import { ancestors as traverse } from "./walker";
+
+import Bun from "bun"
+import * as parser from "@babel/parser";
+import traverse, { NodePath } from "@babel/traverse";
+import cache from "@babel/traverse";
+import { File } from '@babel/types';
+
 import { AnalyzerParams, AnalyzerMatch } from "./types";
 import { regexAnalyzerBuilder } from "./tree-analyzers/regex-pattern";
 import { graphqlAnalyzerBuilder } from "./tree-analyzers/graphql";
@@ -12,7 +17,7 @@ import { evalAnalyzerBuilder } from "./tree-analyzers/eval";
 import { fetchOptionsAnalyzerBuilder } from "./tree-analyzers/fetch-options";
 import { fetchAnalyzerBuilder } from "./tree-analyzers/fetch";
 import { hostnameAnalyzerBuilder } from "./tree-analyzers/hostname";
-import { innerHtmlAnalyzerBuilder } from "./tree-analyzers/inner-html";
+import { innerHTMLAnalyzerBuilder } from "./tree-analyzers/inner-html";
 import { localStorageAnalyzerBuilder } from "./tree-analyzers/local-storage";
 import { locationAnalyzerBuilder } from "./tree-analyzers/location";
 import { onhashchangeAnalyzerBuilder } from "./tree-analyzers/onhashchange";
@@ -27,30 +32,41 @@ import { windowOpenAnalyzerBuilder } from "./tree-analyzers/window-open";
 import { dangerousHtmlAnalyzerBuilder } from "./tree-analyzers/react-dangerously-set-inner-html";
 import { httpMethodsAnalyzerBuilder } from "./tree-analyzers/http-methods";
 
-export function parseFile(filePath: string): AnalyzerParams {
-  const fileContent = fs.readFileSync(filePath, "utf-8");
-
-  let extension: "jsx" | "tsx" = "jsx";
-  if (!["ts"].includes(extension)) {
-    extension = "tsx";
+export async function parseFile(filePath: string): Promise<AnalyzerParams> {
+  const file = Bun.file(filePath);
+  const fileContent = await file.text()  
+  let fileExtension = filePath.split('.').pop()
+  let ast: parser.ParseResult<File>
+  
+  switch(fileExtension) {
+    case "ts":
+      ast = parser.parse(fileContent, {
+      sourceType: "unambiguous", errorRecovery: true,
+      plugins: ["typescript"] });
+      break;
+    case "jsx":
+      ast = parser.parse(fileContent, {
+      sourceType: "unambiguous", errorRecovery: true,
+      plugins: ["jsx"] });
+      break;
+    case "js":
+    case "mjs":
+    case "cjs":
+      ast = parser.parse(fileContent, {
+      sourceType: "unambiguous", errorRecovery: true,
+      plugins: ["jsx"] });
+      break;
+    default:
+      ast = parser.parse(fileContent, {
+      sourceType: "unambiguous", errorRecovery: true,
+      plugins: ["typescript", "jsx"] });
   }
+  // Ecris sur l'erreur et pour l'instant le programme 
 
-  let parsed: ParseResult;
-  try {
-    parsed = parseSync(filePath, fileContent, {
-      sourceType: "module",
-      astType: "ts",
-      lang: extension,
-    });
-  } catch (error) {
-    parsed = parseSync(filePath, fileContent, {
-      sourceType: "module",
-      astType: "ts",
-      lang: extension,
-    });
-  }
-
-  return { ast: parsed.program, source: fileContent, filePath };
+  // ast.errors?.map(error => {
+  //     console.warn(`[WARNING @babel/parse]: ${error}`)
+  //   })
+  return { ast: ast, source: fileContent, filePath };
 }
 
 export type AnalyzerType =
@@ -101,16 +117,16 @@ export type AnalyzerType =
   | "dangerous-html"
   | "http-methods";
 
-export function analyzeFile(
+export async function analyzeFile(
   filePath: string,
   analyzersToRun?: AnalyzerType[]
-): AnalyzerMatch[] {
+): Promise<AnalyzerMatch[]> {
   if (!fs.existsSync(filePath)) {
     throw new Error(`Error: File not found: ${filePath}`);
   }
 
   const results: AnalyzerMatch[] = [];
-  const args = parseFile(filePath);
+  const args = await parseFile(filePath);
 
   const createAnalyzer = <T extends { [key: string]: any }>(
     type: AnalyzerType,
@@ -147,7 +163,7 @@ export function analyzeFile(
   const hostnameAnalyzer = createAnalyzer("hostname", hostnameAnalyzerBuilder);
   const innerHtmlAnalyzer = createAnalyzer(
     "inner-html",
-    innerHtmlAnalyzerBuilder
+    innerHTMLAnalyzerBuilder
   );
   const localStorageAnalyzer = createAnalyzer(
     "local-storage",
@@ -195,87 +211,34 @@ export function analyzeFile(
     "http-methods",
     httpMethodsAnalyzerBuilder
   );
-
-  traverse(args.source, args.ast, {
-    Literal(node, ancestors) {
-      regexAnalyzer?.Literal?.(node, ancestors);
-      graphqlAnalyzer?.Literal?.(node, ancestors);
-      secretsAnalyzer?.Literal?.(node, ancestors);
-      hostnameAnalyzer?.Literal?.(node, ancestors);
-      robustPathsAnalyzer?.Literal?.(node, ancestors);
-    },
-    NewExpression(node, ancestors) {
-      regexAnalyzer?.NewExpression?.(node, ancestors);
-      urlSearchParamsAnalyzer?.NewExpression?.(node, ancestors);
-    },
-    TemplateLiteral(node, ancestors) {
-      robustPathsAnalyzer?.TemplateLiteral?.(node, ancestors);
-      graphqlAnalyzer?.TemplateLiteral?.(node, ancestors);
-    },
-    CallExpression(node, ancestors) {
-      postMessageAnalyzer?.CallExpression?.(node, ancestors);
-      addEventListenerAnalyzer?.CallExpression?.(node, ancestors);
-      cookieAnalyzer?.CallExpression?.(node, ancestors);
-      documentDomainAnalyzer?.CallExpression?.(node, ancestors);
-      evalAnalyzer?.CallExpression?.(node, ancestors);
-      fetchOptionsAnalyzer?.CallExpression?.(node, ancestors);
-      fetchAnalyzer?.CallExpression?.(node, ancestors);
-      hostnameAnalyzer?.CallExpression?.(node, ancestors);
-      innerHtmlAnalyzer?.CallExpression?.(node, ancestors);
-      localStorageAnalyzer?.CallExpression?.(node, ancestors);
-      sessionStorageAnalyzer?.CallExpression?.(node, ancestors);
-      locationAnalyzer?.CallExpression?.(node, ancestors);
-      onhashchangeAnalyzer?.CallExpression?.(node, ancestors);
-      onmessageAnalyzer?.CallExpression?.(node, ancestors);
-      regexMatchAnalyzer?.CallExpression?.(node, ancestors);
-      windowOpenAnalyzer?.CallExpression?.(node, ancestors);
-      robustPathsAnalyzer?.CallExpression?.(node, ancestors);
-      httpMethodsAnalyzer?.CallExpression?.(node, ancestors);
-    },
-    AssignmentExpression(node, ancestors) {
-      postMessageAnalyzer?.AssignmentExpression?.(node, ancestors);
-      addEventListenerAnalyzer?.AssignmentExpression?.(node, ancestors);
-      cookieAnalyzer?.AssignmentExpression?.(node, ancestors);
-      documentDomainAnalyzer?.AssignmentExpression?.(node, ancestors);
-      fetchOptionsAnalyzer?.AssignmentExpression?.(node, ancestors);
-      fetchAnalyzer?.AssignmentExpression?.(node, ancestors);
-      hostnameAnalyzer?.AssignmentExpression?.(node, ancestors);
-      innerHtmlAnalyzer?.AssignmentExpression?.(node, ancestors);
-      localStorageAnalyzer?.AssignmentExpression?.(node, ancestors);
-      sessionStorageAnalyzer?.AssignmentExpression?.(node, ancestors);
-      locationAnalyzer?.AssignmentExpression?.(node, ancestors);
-      onhashchangeAnalyzer?.AssignmentExpression?.(node, ancestors);
-      onmessageAnalyzer?.AssignmentExpression?.(node, ancestors);
-      windowNameAnalyzer?.AssignmentExpression?.(node, ancestors);
-    },
-    MemberExpression(node, ancestors) {
-      postMessageAnalyzer?.MemberExpression?.(node, ancestors);
-      addEventListenerAnalyzer?.MemberExpression?.(node, ancestors);
-      cookieAnalyzer?.MemberExpression?.(node, ancestors);
-      documentDomainAnalyzer?.MemberExpression?.(node, ancestors);
-      fetchOptionsAnalyzer?.MemberExpression?.(node, ancestors);
-      fetchAnalyzer?.MemberExpression?.(node, ancestors);
-      hostnameAnalyzer?.MemberExpression?.(node, ancestors);
-      innerHtmlAnalyzer?.MemberExpression?.(node, ancestors);
-      localStorageAnalyzer?.MemberExpression?.(node, ancestors);
-      sessionStorageAnalyzer?.MemberExpression?.(node, ancestors);
-      locationAnalyzer?.MemberExpression?.(node, ancestors);
-      windowNameAnalyzer?.MemberExpression?.(node, ancestors);
-    },
-    VariableDeclarator(node, ancestors) {
-      documentDomainAnalyzer?.VariableDeclarator?.(node, ancestors);
-    },
-    ObjectExpression(node, ancestors) {
-      fetchOptionsAnalyzer?.ObjectExpression?.(node, ancestors);
-      dangerousHtmlAnalyzer?.ObjectExpression?.(node, ancestors);
-    },
-    JSXElement(node, ancestors) {
-      dangerousHtmlAnalyzer?.JSXElement?.(node, ancestors);
-    },
-    BinaryExpression(node, ancestors) {
-      robustPathsAnalyzer?.BinaryExpression?.(node, ancestors);
-    },
-  });
-
+  const analyzers = [
+    postMessageAnalyzer,//done
+    regexAnalyzer,//done
+    graphqlAnalyzer,// done
+    secretsAnalyzer,//done
+    addEventListenerAnalyzer,//done
+    cookieAnalyzer,//done
+    documentDomainAnalyzer,//done
+    evalAnalyzer,//done
+    fetchOptionsAnalyzer,//done
+    fetchAnalyzer,//done
+    hostnameAnalyzer,//done
+    innerHtmlAnalyzer,//done
+    localStorageAnalyzer,//done
+    sessionStorageAnalyzer,//done
+    locationAnalyzer,//done
+    onhashchangeAnalyzer,
+    onmessageAnalyzer,
+    regexMatchAnalyzer,
+    urlSearchParamsAnalyzer,
+    robustPathsAnalyzer,
+    windowNameAnalyzer,
+    windowOpenAnalyzer,
+    dangerousHtmlAnalyzer,
+    httpMethodsAnalyzer
+  ].filter((visitor) => visitor != null);
+  // tip de claudo : permet de merge le tableau d'analyzer, en une seule passe et une seul ligne.
+  // Babel est vraiment meilleur que oxc sur les méthodes de confort.
+  traverse(args.ast, traverse.visitors.merge(analyzers));
   return results;
 }

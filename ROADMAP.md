@@ -59,16 +59,17 @@ approchent 3,5 Go. Le RSS d'oxc n'a pas été mesuré — la comparaison est inc
       **0.68.1**, conforme au lock. C'était la cause de l'erreur
       `undefined is not an object (evaluating 'fixes')` : sans `node_modules/`, bun auto-résolvait
       la 0.142 depuis le cache global, dont le wrapper attend un AST que le binding 0.68 ne rend pas.
-- [x] **Constituer un corpus de référence figé** → `~/jxscout-regression/corpus/`, **24 fichiers,
+- [x] **Constituer un corpus de référence figé** → `~/jxscout-regression/corpus/`, **23 fichiers,
       30 Mo**, inventaire dans `~/jxscout-regression/MANIFEST.md`. Sélection déterministe :
       les 5 fichiers à vérité terrain connue (2 bundles Easyship portant les CSPT
       `t`@54304/54321/54579, 3 chunks Svelte de Radio France), plus une stratification par taille
       aux percentiles 10/50/90/100 sur chacun des 5 programmes réels. Couvre quatre chaînes de
       build : Vite, Next.js, Svelte, webpack. Le programme `default` est exclu (doublons de
-      `sncf-connect`).
-- [x] **Capturer la sortie JSON actuelle** → `~/jxscout-regression/baseline/`, **24/24 fichiers,
-      14 960 matches, 37,2 s**. Deux fichiers pèsent 27 de ces 37 secondes : kmeet Infomaniak
-      (13 Mo, 14,2 s) et l'app Easyship (10,9 Mo, 13,3 s).
+      `sncf-connect`), et les fichiers qui ne sont pas du JavaScript aussi — voir la correction
+      ci-dessous.
+- [x] **Capturer la sortie JSON actuelle** → `~/jxscout-regression/baseline/`, **23/23 fichiers,
+      14 960 matches, ~40 s**. Deux fichiers pèsent les deux tiers du temps : kmeet Infomaniak
+      (13 Mo, ~14 s) et l'app Easyship (10,9 Mo, ~13 s).
 - [x] **Écrire le comparateur de sorties** → `scripts/regression/compare.ts`, avec
       `scripts/regression/capture.ts` pour produire les captures. Le comparateur apparie d'abord
       sur contenu **et** position, puis sur contenu seul pour distinguer un *déplacement* d'une
@@ -140,11 +141,91 @@ comportement de production.
       même nom des deux côtés. Établir la table de correspondance avant de toucher au code.
       *(45 min)*
 - [ ] **Remplacer `parseFile()`** (`pkg/ast-analyzer/analyzer.ts:33`) par `@babel/parser`.
-      Corriger au passage deux bugs présents : `extension` vaut toujours `"jsx"` au moment du
-      test `if (!["ts"].includes(extension))`, donc `lang` vaut **toujours** `"tsx"` et la
-      branche jsx est morte ; et le `catch` autour de `parseSync` **relance le même appel avec
-      les mêmes options**, ce qui n'est pas un fallback. *(1 h)*
-- [ ] **Adapter le walker.** Babel fournit `loc` nativement, donc tout le calcul de
+      Deux morceaux de code mort à traiter, mais **pas à « réparer »** :
+
+      Le premier est le calcul de `extension`. `let extension: "jsx" | "tsx" = "jsx"` puis
+      `if (!["ts"].includes(extension)) extension = "tsx"` : la condition teste une variable qui
+      vient d'être initialisée à `"jsx"`, elle est donc toujours vraie, et le type déclaré
+      interdit de toute façon que `extension` vaille jamais `"ts"`. `lang` vaut **toujours
+      `"tsx"`**. L'intention d'origine était visiblement de dériver l'extension du chemin du
+      fichier — quelque chose comme `filePath.split(".").pop()` — et l'initialisation a dû
+      disparaître dans un refactor en laissant la coquille. **Ne pas rétablir cette intention
+      pendant le port** : ça ferait parser certains fichiers en `ts` au lieu de `tsx` et
+      changerait la baseline. Supprimer le code mort et fixer le mode en dur, ce qui préserve
+      le comportement actuel. L'équivalent babel de `lang: "tsx"` est
+      `plugins: ["typescript", "jsx"]`.
+
+      Le second est le `try/catch` autour de `parseSync`, dont le `catch` **relance exactement
+      le même appel avec les mêmes options**. Ce n'est pas un fallback, c'est une répétition.
+      *(1 h)*
+
+- [ ] **Remonter les erreurs de parse.**
+      Vérifié à l'exécution : `parseSync` d'oxc **ne lève pas d'exception** sur un fichier
+      invalide, il retourne un tableau `errors`. Ce qui explique d'ailleurs pourquoi le
+      `try/catch` ci-dessus n'a jamais rien attrapé. Or `parseFile()` renvoie
+      `{ ast: parsed.program, source, filePath }` **sans jamais consulter `parsed.errors`**.
+      Conséquence : un fichier qui échoue au parse produit un arbre vide ou partiel, l'analyzer
+      rend zéro match, et **rien ne le signale** — ni le Go, ni la base, ni l'extension. Un
+      fichier non analysable est aujourd'hui indistinguable d'un fichier propre.
+      Ça vaut pour le port babel aussi, avec `errorRecovery: true` qui remplit
+      `ast.errors` de la même manière. Utile pendant la phase 1 : sans ça, une régression
+      de portage qui casserait le parse d'une famille de fichiers passerait pour un simple
+      « 0 match ». *(1 h)*
+
+      **Fréquence réelle : faible, et à ne pas surestimer.** Le seul cas rencontré sur le corpus
+      était un fallback HTML servi à la place d'un chunk — or jxscout ne l'aurait jamais soumis
+      à l'analyzer, puisqu'il classe par sniffing de contenu et non par extension d'URL. Du JS
+      réellement servi par un site est du JS qu'un navigateur exécute, donc syntaxiquement
+      valide. Le défaut reste réel — `parsed.errors` n'est consulté nulle part — mais aucun cas
+      de production ne l'a encore déclenché.
+
+      Matrice de comportement des modes, mesurée sur oxc 0.68.1 :
+
+      | Syntaxe | `ts` | `tsx` | `jsx` |
+      |---|---|---|---|
+      | `const f = <T>(x: T) => x` (générique fléché) | ok | **erreur** | **erreur** |
+      | `const y = <string>z` (assertion à chevrons) | ok | **erreur** | **erreur** |
+      | `const e = <div>hi</div>` (JSX) | **erreur** | ok | ok |
+      | `interface` / `enum` / `as` | ok | ok | **erreur** |
+      | `function f<T>(x: T): T` (générique nommé) | ok | ok | **erreur** |
+
+      Lecture : `tsx` et `ts` ne divergent que sur **deux** syntaxes, et le TypeScript ordinaire
+      passe identiquement dans les deux. `tsx` reste donc le bon défaut. Le mode `jsx` casse sur
+      tout ce qui est typé et n'a aucun intérêt ici.
+
+- [x] **Choisir les plugins babel selon l'extension du fichier** — proposition kbtch_, retenue.
+      C'est ce que l'auteur d'origine voulait manifestement faire, et babel s'y prête mieux
+      qu'oxc puisqu'il expose des plugins composables plutôt qu'un `lang` monolithique :
+
+      | Extension | `plugins` |
+      |---|---|
+      | `.ts` | `["typescript"]` |
+      | `.tsx` | `["typescript", "jsx"]` |
+      | `.jsx` | `["jsx"]` |
+      | `.js` `.mjs` `.cjs` | `["jsx"]` |
+      | inconnue / absente | `["typescript", "jsx"]` (le plus permissif) |
+
+      Deux réserves. `typescript` et `flow` sont **mutuellement exclusifs** chez babel : un
+      fichier Flow (reconnaissable au pragma `/* @flow */`) demande une bascule explicite, il ne
+      suffit pas d'empiler les plugins. Et le `sourceType: "unambiguous"` visé change aussi le
+      comportement — l'analyzer force aujourd'hui `"module"`, ce qui fait échouer certains
+      fichiers script.
+
+      **Méthode — décision kbtch_ : faire bien tout de suite**, détection d'extension et
+      `sourceType: "unambiguous"` inclus dans le port, plutôt qu'un port à iso-comportement suivi
+      d'améliorations. Acté.
+
+      La conséquence à assumer est que le comparateur cesse d'être un test binaire (« zéro écart
+      ou régression ») pour devenir un **inventaire à expliquer** : il y aura des écarts, et
+      chacun devra être justifié à la main. C'est son usage normal, simplement plus coûteux à
+      dépouiller.
+
+      Le coût d'attribution se récupère presque gratuitement en rendant le choix du mode
+      **paramétrable** dans l'implémentation, par variable d'environnement. Le même binaire
+      permet alors deux captures — une avec la détection d'extension active, une avec
+      `["typescript","jsx"]` forcé partout — et la comparaison des deux isole exactement ce que
+      la détection a changé, sans avoir eu à étaler le travail dans le temps.
+- [x] **Adapter le walker.** Babel fournit `loc` nativement, donc tout le calcul de
       `lineOffsets` + `getPosition` de `walker.ts` devient inutile — c'est autant de moins
       à optimiser en phase 2. Vérifier que `node.start` / `node.end` restent disponibles
       (ils le sont, mais `value: source.slice(start, end)` en dépend partout). *(1 h)*
@@ -232,6 +313,22 @@ besoin de nommer quoi que ce soit, ni de transcrire.
       `@babel/traverse` construit un `NodePath` **par nœud**, ce qui est exactement le genre de
       coût qu'on vient de traquer en phase 2 : ne le payer que sur les nœuds retenus, pas sur
       l'arbre entier. *(2 h)*
+- [ ] **Résoudre les noms de propriété calculés — reporté, à faire ici.** Tous les analyzers
+      testent des noms littéraux (`el.fetch`, `el["fetch"]`). Trois familles leur échappent, et
+      elles partagent le mécanisme du point précédent (`path.scope.getBinding`) :
+      `var a = "fetch"; el[a](u)` — le nom vit dans une variable. Le `!computed` ajouté aux
+      analyzers n'aide pas contre ça : il retire un faux positif, il ne révèle rien.
+      Mesuré sur `~/jxscout` : `X[<identifiant>](…)` **6882** — c'est le seul volume réel, et
+      c'est du minifieur ordinaire référençant une variable, pas de l'évasion délibérée.
+      Les familles « dissimulation » sont **absentes du corpus**, vérifié : découpage de nom
+      `["fe" + "tch"]` **0** · `[atob(…)]` **0** · noms `_0x…` (signature
+      `javascript-obfuscator`) 52 occurrences seulement. (Une première mesure annonçait 1253
+      concaténations : motif trop large, il comptait `["item-" + id]`, `["cScale" + i]` et
+      autres constructions de clé dynamique légitimes — chiffre invalide, retiré.)
+      Même dépendance que les alias de `document` (`d.cookie` où `d = document`, réservoir
+      mesuré à 1431 `var X = document` + 310 affectations). Un seul mécanisme débloque les deux
+      familles. Décision kbtch_ (2026-08-02) : hors périmètre du port, ni jxscout amont ni
+      l'analyzer regex ne le couvrent — *stick to the plan*. *(non chiffré)*
 - [ ] **Rejouer la vérité terrain Easyship.** Les 3 CSPT `t`@54304/54321/54579 doivent ressortir
       `SOURCE_CONFIRMED` avec la trace `URLSearchParams(window.location.search)`, sans qu'aucun
       LLM n'intervienne. C'est le test qui valide toute la phase. *(1 h)*

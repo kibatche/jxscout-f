@@ -1,6 +1,6 @@
-import { Node } from "acorn";
-import { Analyzer, AnalyzerMatch, AnalyzerParams } from "../types";
-import { Visitor } from "../walker";
+import { AnalyzerMatch, AnalyzerParams } from "../types";
+import { NodePath, Visitor } from "@babel/traverse";
+import * as t from "@babel/types";
 
 export const FETCH_ANALYZER_NAME = "fetch";
 
@@ -8,18 +8,18 @@ const fetchAnalyzerBuilder = (
   args: AnalyzerParams,
   matchesReturn: AnalyzerMatch[]
 ): Visitor => {
-  return {
-    CallExpression(node, ancestors) {
-      if (!node.loc) {
-        return;
-      }
+  const handle = (path: NodePath<t.CallExpression | t.OptionalCallExpression>) => {
+      const node = path.node
+      if (!node.loc || node.start == null || node.end == null) return;
+  
+    // Check if this is an fetch call
+    const isFetchCall = (
+      (t.isMemberExpression(node.callee) || t.isOptionalMemberExpression(node.callee)) 
+      && ((t.isIdentifier(node.callee.property, { name: "fetch" }) && !node.callee.computed) || t.isStringLiteral(node.callee.property, { value: "fetch" }))
+    )
+      || t.isIdentifier(node.callee, { name: "fetch" })
 
-      // Check if this is a fetch call
-      if (
-        node.callee.type === "Identifier" &&
-        node.callee.name === "fetch" &&
-        node.arguments.length >= 1
-      ) {
+      if (isFetchCall) {
         const match: AnalyzerMatch = {
           filePath: args.filePath,
           analyzerName: FETCH_ANALYZER_NAME,
@@ -33,8 +33,9 @@ const fetchAnalyzerBuilder = (
 
         matchesReturn.push(match);
       }
-    },
+    }
+    return { CallExpression: handle, OptionalCallExpression: handle };
   };
-};
+
 
 export { fetchAnalyzerBuilder };

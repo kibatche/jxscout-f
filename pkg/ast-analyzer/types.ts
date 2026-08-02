@@ -1,6 +1,8 @@
-import { Position } from "acorn";
-import { Program } from "oxc-parser";
-import { Visitor } from "./walker";
+import * as parser from "@babel/parser";
+import type { File, SourceLocation } from "@babel/types"
+import { Visitor } from "@babel/traverse";
+
+export type Position = SourceLocation["start"]
 
 export interface AnalyzerMatch {
   filePath: string;
@@ -13,7 +15,7 @@ export interface AnalyzerMatch {
 }
 
 export interface AnalyzerParams {
-  ast: Program;
+  ast: parser.ParseResult<File>;
   source: string;
   filePath: string;
 }

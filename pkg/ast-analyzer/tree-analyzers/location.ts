@@ -1,6 +1,6 @@
-import { Node, MemberExpression } from "acorn";
-import { Analyzer, AnalyzerMatch, AnalyzerParams } from "../types";
-import { Visitor } from "../walker";
+import { AnalyzerMatch, AnalyzerParams } from "../types";
+import { NodePath, Visitor } from "@babel/traverse";
+import * as t from "@babel/types";
 
 export const LOCATION_ANALYZER_NAME = "location";
 
@@ -21,136 +21,94 @@ const locationAnalyzerBuilder = (
   args: AnalyzerParams,
   matchesReturn: AnalyzerMatch[]
 ): Visitor => {
-  return {
-    AssignmentExpression(node, ancestors) {
-      if (!node.loc) {
-        return;
-      }
+  const handleAssignment = (path: NodePath<t.AssignmentExpression>) => {
+    const node = path.node;
+    if (!node.loc || node.start == null || node.end == null) return;
 
-      // Helper function to check if a node is a location access
-      const isLocationAccess = (node: Node): boolean => {
-        if (node.type !== "MemberExpression") return false;
-        const memberNode = node as MemberExpression;
+    // On est obligé de faire cela afin de pouvoir accéder à ) node.left.object au cas où on a
+    // whatever.location.href = truc.
+    // href, dans ce cas, reste une propriété de left, mais par contre location dvient une propriété de l'objet "whatever"
+    // Cela semble inutilement compliqué mais les check de type ts nous obligent à faire cela.
+    const left = node.left
+    if (!t.isMemberExpression(left) && !t.isOptionalMemberExpression(left)) return;
+    const obj = left.object;
+    const base =
+      t.isIdentifier(obj, { name: "location" })
+      || ((t.isMemberExpression(obj) || t.isOptionalMemberExpression(obj))
+        && ((t.isIdentifier(obj.property, { name: "location" }) && !obj.computed)
+          || t.isStringLiteral(obj.property, { value: "location" })));
 
-        // Direct location access (e.g., location.href)
-        if (
-          memberNode.object.type === "Identifier" &&
-          memberNode.object.name === "location" &&
-          memberNode.property.type === "Identifier" &&
-          LOCATION_PROPERTIES.includes(memberNode.property.name)
-        ) {
-          return true;
-        }
+    const okProp =
+      (t.isIdentifier(left.property) && !left.computed && LOCATION_PROPERTIES.includes(left.property.name))
+      || (t.isStringLiteral(left.property) && LOCATION_PROPERTIES.includes(left.property.value));
 
-        // Window.location access (e.g., window.location.href)
-        if (
-          memberNode.object.type === "MemberExpression" &&
-          memberNode.object.object.type === "Identifier" &&
-          memberNode.object.object.name === "window" &&
-          memberNode.object.property.type === "Identifier" &&
-          memberNode.object.property.name === "location" &&
-          memberNode.property.type === "Identifier" &&
-          LOCATION_PROPERTIES.includes(memberNode.property.name)
-        ) {
-          return true;
-        }
+    const isLocationAssignment = base && okProp;
 
-        return false;
+    // Check for location assignments - only on the left side
+    if (isLocationAssignment) {
+      const locationPropertyName = t.isIdentifier(left.property) && !left.computed ? left.property.name
+        : t.isStringLiteral(left.property) ? left.property.value : "dynamic"
+
+      const match: AnalyzerMatch = {
+        filePath: args.filePath,
+        analyzerName: LOCATION_ANALYZER_NAME,
+        value: args.source.slice(node.start, node.end),
+        start: node.loc.start,
+        end: node.loc.end,
+        tags: {
+          location: true,
+          "location-assignment": true,
+          [`property-${locationPropertyName}`]: true,
+        },
       };
 
-      // Check for location assignments - only on the left side
-      if (isLocationAccess(node.left)) {
-        const memberNode = node.left as MemberExpression;
-        const propertyName =
-          memberNode.property.type === "Identifier"
-            ? memberNode.property.name
-            : "unknown";
+      matchesReturn.push(match);
+      return; // Return early to prevent double detection
+    }
+  }
 
-        const match: AnalyzerMatch = {
-          filePath: args.filePath,
-          analyzerName: LOCATION_ANALYZER_NAME,
-          value: args.source.slice(node.start, node.end),
-          start: node.loc.start,
-          end: node.loc.end,
-          tags: {
-            location: true,
-            "location-assignment": true,
-            [`property-${propertyName}`]: true,
-          },
-        };
+  const handleMemberExpression = (path: NodePath<t.MemberExpression | t.OptionalMemberExpression>) => {
+    const node = path.node
+    if (!node.loc || node.start == null || node.end == null) return;
 
-        matchesReturn.push(match);
-        return; // Return early to prevent double detection
-      }
-    },
+    // On teste si le parent est une affectation et si le noeud courant est à gauche dudit parent retrouvé
+    if (path.findParent(p => p.isAssignmentExpression() && p.node.left === path.node)) return;
 
-    MemberExpression(node, ancestors) {
-      if (!node.loc) {
-        return;
-      }
 
-      // Skip if we're inside an AssignmentExpression (left side)
-      const isInAssignment = ancestors.some(
-        (ancestor) =>
-          ancestor.type === "AssignmentExpression" && ancestor.left === node
-      );
-      if (isInAssignment) {
-        return;
-      }
+    const obj = node.object;
+    const base =
+      t.isIdentifier(obj, { name: "location" })
+      || ((t.isMemberExpression(obj) || t.isOptionalMemberExpression(obj))
+        && ((t.isIdentifier(obj.property, { name: "location" }) && !obj.computed)
+          || t.isStringLiteral(obj.property, { value: "location" })));
 
-      // Helper function to check if a node is a location access
-      const isLocationAccess = (node: Node): boolean => {
-        if (node.type !== "MemberExpression") return false;
-        const memberNode = node as MemberExpression;
+    const okProp =
+      (t.isIdentifier(node.property) && !node.computed && LOCATION_PROPERTIES.includes(node.property.name))
+      || (t.isStringLiteral(node.property) && LOCATION_PROPERTIES.includes(node.property.value));
 
-        // Direct location access (e.g., location.href)
-        if (
-          memberNode.object.type === "Identifier" &&
-          memberNode.object.name === "location" &&
-          memberNode.property.type === "Identifier" &&
-          LOCATION_PROPERTIES.includes(memberNode.property.name)
-        ) {
-          return true;
-        }
+    const isLocationRead = base && okProp;
 
-        // Window.location access (e.g., window.location.href)
-        if (
-          memberNode.object.type === "MemberExpression" &&
-          memberNode.object.object.type === "Identifier" &&
-          memberNode.object.object.name === "window" &&
-          memberNode.object.property.type === "Identifier" &&
-          memberNode.object.property.name === "location" &&
-          memberNode.property.type === "Identifier" &&
-          LOCATION_PROPERTIES.includes(memberNode.property.name)
-        ) {
-          return true;
-        }
+    if (isLocationRead) {
+      const locationPropertyName = t.isIdentifier(node.property) && !node.computed ? node.property.name
+        : t.isStringLiteral(node.property) ? node.property.value : "dynamic"
 
-        return false;
+      const match: AnalyzerMatch = {
+        filePath: args.filePath,
+        analyzerName: LOCATION_ANALYZER_NAME,
+        value: args.source.slice(node.start, node.end),
+        start: node.loc.start,
+        end: node.loc.end,
+        tags: {
+          location: true,
+          "location-read": true,
+          [`property-${locationPropertyName}`]: true,
+        },
       };
 
-      // Check for location reads
-      if (isLocationAccess(node)) {
-        const propertyName =
-          node.property.type === "Identifier" ? node.property.name : "unknown";
-
-        const match: AnalyzerMatch = {
-          filePath: args.filePath,
-          analyzerName: LOCATION_ANALYZER_NAME,
-          value: args.source.slice(node.start, node.end),
-          start: node.loc.start,
-          end: node.loc.end,
-          tags: {
-            location: true,
-            "location-read": true,
-            [`property-${propertyName}`]: true,
-          },
-        };
-
-        matchesReturn.push(match);
-      }
-    },
-  };
+      matchesReturn.push(match);
+    }
+  }
+  return { AssignmentExpression: handleAssignment, MemberExpression: handleMemberExpression, OptionalMemberExpression: handleMemberExpression }
 };
 
 export { locationAnalyzerBuilder };

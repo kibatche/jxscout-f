@@ -1,6 +1,6 @@
-import { Node } from "acorn";
-import { Analyzer, AnalyzerMatch, AnalyzerParams } from "../types";
-import { Visitor } from "../walker";
+import { AnalyzerMatch, AnalyzerParams } from "../types";
+import { NodePath, Visitor } from "@babel/traverse";
+import * as t from "@babel/types";
 
 export const POSTMESSAGE_ANALYZER_NAME = "postmessage";
 
@@ -8,19 +8,18 @@ const postmessageAnalyzerBuilder = (
   args: AnalyzerParams,
   matchesReturn: AnalyzerMatch[]
 ): Visitor => {
-  return {
-    CallExpression(node, ancestors) {
-      if (!node.loc) {
-        return;
-      }
-
-      // Check if this is a postMessage call
-      if (
-        node.callee.type === "MemberExpression" &&
-        node.callee.property.type === "Identifier" &&
-        node.callee.property.name === "postMessage" &&
-        node.arguments.length >= 1
-      ) {
+    const handle = (path: NodePath<t.CallExpression | t.OptionalCallExpression>) => {
+      const node = path.node
+      if (!node.loc || node.start == null || node.end == null) return;
+  
+      // Check if this is an postMessage call
+      const isPostMessageCall = (
+        (t.isMemberExpression(node.callee) || t.isOptionalMemberExpression(node.callee)) 
+        && ((t.isIdentifier(node.callee.property, { name: "postMessage" })&& !node.callee.computed) || t.isStringLiteral(node.callee.property, { value: "postMessage" }))
+      )
+        || t.isIdentifier(node.callee, { name: "postMessage" })
+  
+      if (isPostMessageCall && node.arguments.length >= 1) {
         const match: AnalyzerMatch = {
           filePath: args.filePath,
           analyzerName: POSTMESSAGE_ANALYZER_NAME,
@@ -34,8 +33,9 @@ const postmessageAnalyzerBuilder = (
 
         matchesReturn.push(match);
       }
-    },
+    }
+    return {CallExpression: handle, OptionalCallExpression: handle}
   };
-};
+
 
 export { postmessageAnalyzerBuilder };

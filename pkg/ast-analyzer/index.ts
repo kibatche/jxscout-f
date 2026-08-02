@@ -1,3 +1,4 @@
+import { any } from "estree-toolkit/dist/assert";
 import { analyzeFile } from "./analyzer";
 
 function printUsage() {
@@ -5,7 +6,7 @@ function printUsage() {
   process.exit(1);
 }
 
-function main() {
+async function main(): Promise<any> {
   const args = process.argv.slice(2);
 
   if (args.length < 1) {
@@ -15,7 +16,7 @@ function main() {
   const [filePath] = args;
 
   try {
-    const results = analyzeFile(filePath);
+    const results = await analyzeFile(filePath);
     console.log(JSON.stringify(results));
   } catch (error) {
     console.error(`Error running ast analysis:`, error);
@@ -23,4 +24,4 @@ function main() {
   }
 }
 
-main();
+await main();
