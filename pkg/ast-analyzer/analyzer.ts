@@ -227,7 +227,7 @@ export async function analyzeFile(
     localStorageAnalyzer,//done
     sessionStorageAnalyzer,//done
     locationAnalyzer,//done
-    onhashchangeAnalyzer,
+    onhashchangeAnalyzer,//done
     onmessageAnalyzer,
     regexMatchAnalyzer,
     urlSearchParamsAnalyzer,

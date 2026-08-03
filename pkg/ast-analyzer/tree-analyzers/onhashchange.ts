@@ -11,17 +11,28 @@ const onhashchangeAnalyzerBuilder = (
   const handleAssignment = (path: NodePath<t.AssignmentExpression>) => {
     const node = path.node;
     if (!node.loc || node.start == null || node.end == null) return;
+    const left = node.left
 
-    //A REFAIRE
-    // const left = node.left
-    // if (!t.isMemberExpression(left) && !t.isOptionalMemberExpression(left)) return;
-    // const isOnhashchangeAssignment = (
-    //   t.isIdentifier(left.object)
-    //   && ((t.isIdentifier(left.property, { name: "onhashchange" }) && !left.computed) || t.isStringLiteral(left.property, { value: "onhashchange" })))
-    //   ||
-    //   ((t.isMemberExpression(left.object) || t.isOptionalMemberExpression(left.object))
-    //     && (t.isIdentifier(left.object.property, { name: "onhashchange" }) || t.isStringLiteral(left.object.property, { value: "onhashchange" }))
-    //     && (t.isIdentifier(left.property) || t.isStringLiteral(left.property)))
+    //cas où on a juste "onhashchange = truc", on doit return directement.
+    // sinon le test suivant sur la présence d'un memberExpression invalide cette écriture pourtant valide.
+    const isOnlyOnhashchangeAssignment = t.isIdentifier(left, {name: "onhashchange"})
+    if (isOnlyOnhashchangeAssignment) { 
+      matchesReturn.push({
+        filePath: args.filePath,
+        analyzerName: ONHASHCHANGE_ANALYZER_NAME,
+        value: args.source.slice(node.start, node.end),
+        start: node.loc.start,
+        end: node.loc.end,
+        tags: {
+          onhashchange: true,
+        },
+      });
+      return;
+     };
+    if (!t.isMemberExpression(left) && !t.isOptionalMemberExpression(left)) return;
+    const isOnhashchangeAssignment =
+    (((t.isIdentifier(left.property, {name: "onhashchange"}) && !left.computed)// cas où whatever.onhashchange = truc ou whatever.whatever.onhashchange = truc
+        || t.isStringLiteral(left.property, {value: "onhashchange"})))// cas où whatever['onhashchange'] = truc
 
     // Check if this is an onhashchange assignment
     if (isOnhashchangeAssignment) {
@@ -45,16 +56,10 @@ const onhashchangeAnalyzerBuilder = (
     const callee = path.node.callee
     if (!t.isMemberExpression(callee) && !t.isOptionalMemberExpression(callee)) return;
     // Check if this is an addEventListener call with "hashchange" event
-    
-    //A REFAIRE
-    // const isAddEventListenerWithHashchange = (
-    //   t.isIdentifier(callee.object)
-    //   && ((t.isIdentifier(callee.property, { name: "addEventListener" }) && !callee.computed) || t.isStringLiteral(callee.property, { value: "addEventListener" })))
-    //   ||
-    //   ((t.isMemberExpression(callee.object) || t.isOptionalMemberExpression(callee.object))
-    //     && (t.isIdentifier(callee.object.property, { name: "addEventListener" }) || t.isStringLiteral(callee.object.property, { value: "addEventListener" }))
-    //     && (t.isIdentifier(callee.property, { name: "onhashchange" }) || t.isStringLiteral(callee.property, { value: "onhashchange" })))
-
+    const isAddEventListenerWithHashchange =
+    path.node.arguments.length > 1
+      &&((t.isIdentifier(callee.property, {name: "addEventListener"}) && !callee.computed) || t.isStringLiteral(callee.property, {value: "addEventListener"}))
+        && t.isStringLiteral(path.node.arguments[0], {value: "hashchange"})
 
     if (isAddEventListenerWithHashchange) {
       const match: AnalyzerMatch = {
