@@ -1,6 +1,6 @@
-import { Node } from "acorn";
-import { Analyzer, AnalyzerMatch, AnalyzerParams } from "../types";
-import { Visitor } from "@babel/traverse";
+import { AnalyzerMatch, AnalyzerParams } from "../types";
+import { NodePath, Visitor } from "@babel/traverse";
+import * as t from "@babel/types";
 
 export const REGEX_MATCH_ANALYZER_NAME = "regex-match";
 
@@ -8,97 +8,45 @@ const regexMatchAnalyzerBuilder = (
   args: AnalyzerParams,
   matchesReturn: AnalyzerMatch[]
 ): Visitor => {
-  return {
-    CallExpression(node, ancestors) {
-      if (!node.loc) {
-        return;
-      }
+  const handleCallExpression = (path: NodePath<t.CallExpression | t.OptionalCallExpression>) => {
+    const node = path.node;
+    if (!node.loc || node.start == null || node.end == null) return;
+    const callee = node.callee
 
-      // Check for string.match() calls
-      if (
-        node.callee.type === "MemberExpression" &&
-        node.callee.property.type === "Identifier" &&
-        node.callee.property.name === "match" &&
-        (node.callee.object.type === "Identifier" ||
-          (node.callee.object.type === "Literal" &&
-            typeof node.callee.object.value === "string")) &&
-        node.arguments.length > 0 &&
-        (node.arguments[0].type === "Literal" ||
-          (node.arguments[0] as any).regex)
-      ) {
-        const match: AnalyzerMatch = {
-          filePath: args.filePath,
-          analyzerName: REGEX_MATCH_ANALYZER_NAME,
-          value: args.source.slice(node.start, node.end),
-          start: node.loc.start,
-          end: node.loc.end,
-          tags: {
-            "regex-match": true,
-          },
-        };
+    if (!t.isMemberExpression(callee) && !t.isOptionalMemberExpression(callee)) return;
 
-        matchesReturn.push(match);
-      }
+    // Check for whatever.match() calls
+    const isMatchCall =
+      node.arguments.length > 0
+      && (
+        (t.isIdentifier(callee.property, { name: "match" }) && !callee.computed) || t.isStringLiteral(callee.property, { value: "match" })
+      )
+      && (t.isRegExpLiteral(node.arguments[0]))// On ne met pas le string literal, un tel tests x.match('foo') n'a pas vraiment de sens.
 
-      // Check for RegExp.test() calls and regex literal test() calls
-      if (
-        node.callee.type === "MemberExpression" &&
-        node.callee.property.type === "Identifier" &&
-        node.callee.property.name === "test" &&
-        ((node.callee.object.type === "NewExpression" &&
-          node.callee.object.callee.type === "Identifier" &&
-          node.callee.object.callee.name === "RegExp") ||
-          (node.callee.object.type === "Identifier" &&
-            node.callee.object.name === "RegExp") ||
-          (node.callee.object.type === "Identifier" &&
-            node.callee.object.name === "regex") ||
-          (node.callee.object.type === "Literal" &&
-            (node.callee.object as any).regex))
-      ) {
-        const match: AnalyzerMatch = {
-          filePath: args.filePath,
-          analyzerName: REGEX_MATCH_ANALYZER_NAME,
-          value: args.source.slice(node.start, node.end),
-          start: node.loc.start,
-          end: node.loc.end,
-          tags: {
-            "regex-match": true,
-          },
-        };
+    // check for anyregex.test|exec(whatever)
+     const isTestExecCall = 
+     node.arguments.length > 0
+     && t.isRegExpLiteral(callee.object)
+     && (
+      ((t.isIdentifier(callee.property, { name: "test" }) && !callee.computed) || t.isStringLiteral(callee.property, { value: "test" }))
+      || ((t.isIdentifier(callee.property, { name: "exec" }) && !callee.computed) || t.isStringLiteral(callee.property, { value: "exec" }))
+    )
 
-        matchesReturn.push(match);
-      }
-
-      // Check for RegExp.exec() calls and regex literal exec() calls
-      if (
-        node.callee.type === "MemberExpression" &&
-        node.callee.property.type === "Identifier" &&
-        node.callee.property.name === "exec" &&
-        ((node.callee.object.type === "NewExpression" &&
-          node.callee.object.callee.type === "Identifier" &&
-          node.callee.object.callee.name === "RegExp") ||
-          (node.callee.object.type === "Identifier" &&
-            node.callee.object.name === "RegExp") ||
-          (node.callee.object.type === "Identifier" &&
-            node.callee.object.name === "regex") ||
-          (node.callee.object.type === "Literal" &&
-            (node.callee.object as any).regex))
-      ) {
-        const match: AnalyzerMatch = {
-          filePath: args.filePath,
-          analyzerName: REGEX_MATCH_ANALYZER_NAME,
-          value: args.source.slice(node.start, node.end),
-          start: node.loc.start,
-          end: node.loc.end,
-          tags: {
-            "regex-match": true,
-          },
-        };
-
-        matchesReturn.push(match);
-      }
-    },
-  };
+    if (isMatchCall || isTestExecCall) {
+      const match: AnalyzerMatch = {
+        filePath: args.filePath,
+        analyzerName: REGEX_MATCH_ANALYZER_NAME,
+        value: args.source.slice(node.start, node.end),
+        start: node.loc.start,
+        end: node.loc.end,
+        tags: {
+          "regex-match": true,
+        },
+      };
+      matchesReturn.push(match);
+    }
+  }
+  return { CallExpression: handleCallExpression, OptionalCallExpression: handleCallExpression }
 };
 
 export { regexMatchAnalyzerBuilder };

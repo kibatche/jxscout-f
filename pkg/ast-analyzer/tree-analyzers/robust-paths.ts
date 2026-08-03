@@ -1,222 +1,9 @@
-import { Node } from "acorn";
-import { Analyzer, AnalyzerMatch, AnalyzerParams } from "../types";
-import { Visitor } from "@babel/traverse";
-import path from "path";
+import { AnalyzerMatch, AnalyzerParams } from "../types";
+import { NodePath, Visitor } from "@babel/traverse";
+import * as t from "@babel/types";
+import { COMMON_MIME_TYPES, FILE_EXTENSIONS } from "../constant/iana-tld";
 
-const COMMON_MIME_TYPES = new Set([
-  "application/json",
-  "application/ld+json",
-  "application/xml",
-  "application/x-www-form-urlencoded",
-  "application/octet-stream",
-  "application/pdf",
-  "application/zip",
-  "application/javascript",
-  "application/ecmascript",
-  "application/x-httpd-php",
-  "application/x-shockwave-flash",
-  "application/x-msdownload",
-  "application/x-ms-write",
-  "application/x-ms-xbap",
-  "application/x-msaccess",
-  "application/x-msbinder",
-  "application/x-mscardfile",
-  "application/x-msclip",
-  "application/x-ms-msdownload",
-  "application/x-msmediaview",
-  "application/x-msmetafile",
-  "application/x-msmoney",
-  "application/x-mspublisher",
-  "application/x-msschedule",
-  "application/x-msterminal",
-  "application/x-mswrite",
-  "application/x-netcdf",
-  "application/x-perfmon",
-  "application/x-pkcs10",
-  "application/x-pkcs12",
-  "application/x-pkcs7-mime",
-  "application/x-pkcs7-signature",
-  "application/x-sh",
-  "application/x-shar",
-  "application/x-silverlight-app",
-  "application/x-stuffit",
-  "application/x-stuffitx",
-  "application/x-sv4cpio",
-  "application/x-sv4crc",
-  "application/x-tar",
-  "application/x-tcl",
-  "application/x-tex",
-  "application/x-texinfo",
-  "application/x-tex-tfm",
-  "application/x-tex-xdvi",
-  "application/x-troff",
-  "application/x-troff-man",
-  "application/x-troff-me",
-  "application/x-troff-ms",
-  "application/x-troff-msvideo",
-  "application/x-ustar",
-  "application/x-wais-source",
-  "application/x-x509-ca-cert",
-  "application/x-xfig",
-  "application/x-xpinstall",
-  "application/x-xz",
-  "application/x-zip-compressed",
-  "application/x-zip",
-  "application/xhtml+xml",
-  "application/xml",
-  "application/xml-dtd",
-  "application/xml-external-parsed-entity",
-  "application/zip",
-  "audio/midi",
-  "audio/mp4",
-  "audio/mpeg",
-  "audio/ogg",
-  "audio/webm",
-  "audio/x-aac",
-  "audio/x-aiff",
-  "audio/x-mpegurl",
-  "audio/x-ms-wax",
-  "audio/x-ms-wma",
-  "audio/x-pn-realaudio",
-  "audio/x-pn-realaudio-plugin",
-  "audio/x-realaudio",
-  "audio/x-wav",
-  "chemical/x-cdx",
-  "chemical/x-cif",
-  "chemical/x-cmdf",
-  "chemical/x-cml",
-  "chemical/x-csml",
-  "chemical/x-xyz",
-  "font/collection",
-  "font/otf",
-  "font/ttf",
-  "font/woff",
-  "font/woff2",
-  "image/bmp",
-  "image/cgm",
-  "image/g3fax",
-  "image/gif",
-  "image/ief",
-  "image/jpeg",
-  "image/pjpeg",
-  "image/png",
-  "image/prs.btif",
-  "image/svg+xml",
-  "image/tiff",
-  "image/vnd.adobe.photoshop",
-  "image/vnd.djvu",
-  "image/vnd.dwg",
-  "image/vnd.dxf",
-  "image/vnd.fastbidsheet",
-  "image/vnd.fpx",
-  "image/vnd.microsoft.icon",
-  "image/vnd.ms-modi",
-  "image/vnd.net-fpx",
-  "image/vnd.wap.wbmp",
-  "image/vnd.xiff",
-  "image/webp",
-  "image/x-cmu-raster",
-  "image/x-cmx",
-  "image/x-icon",
-  "image/x-portable-anymap",
-  "image/x-portable-bitmap",
-  "image/x-portable-graymap",
-  "image/x-portable-pixmap",
-  "image/x-rgb",
-  "image/x-xbitmap",
-  "image/x-xpixmap",
-  "image/x-xwindowdump",
-  "message/rfc822",
-  "model/gltf-binary",
-  "model/gltf+json",
-  "model/iges",
-  "model/mesh",
-  "model/vnd.collada+xml",
-  "model/vnd.dwf",
-  "model/vnd.gdl",
-  "model/vnd.gtw",
-  "model/vnd.mts",
-  "model/vnd.opengex",
-  "model/vnd.parasolid.transmit.binary",
-  "model/vnd.parasolid.transmit.text",
-  "model/vnd.usdz+zip",
-  "model/vnd.valve.source.compiled-map",
-  "model/vnd.vrml",
-  "model/x3d+binary",
-  "model/x3d+vrml",
-  "model/x3d+xml",
-  "multipart/form-data",
-  "multipart/mixed",
-  "multipart/related",
-  "multipart/report",
-  "text/calendar",
-  "text/css",
-  "text/csv",
-  "text/html",
-  "text/javascript",
-  "text/plain",
-  "text/richtext",
-  "text/sgml",
-  "text/tab-separated-values",
-  "text/troff",
-  "text/vnd.curl",
-  "text/vnd.curl.dcurl",
-  "text/vnd.curl.mcurl",
-  "text/vnd.curl.scurl",
-  "text/vnd.dvb.subtitle",
-  "text/vnd.fly",
-  "text/vnd.fmi.flexstor",
-  "text/vnd.graphviz",
-  "text/vnd.in3d.3dml",
-  "text/vnd.in3d.spot",
-  "text/vnd.sun.j2me.app-descriptor",
-  "text/vnd.wap.si",
-  "text/vnd.wap.sl",
-  "text/vnd.wap.wml",
-  "text/vnd.wap.wmlscript",
-  "text/x-asm",
-  "text/x-c",
-  "text/x-fortran",
-  "text/x-java-source",
-  "text/x-nfo",
-  "text/x-opml",
-  "text/x-pascal",
-  "text/x-setext",
-  "text/x-uuencode",
-  "text/x-vcalendar",
-  "text/x-vcard",
-  "text/xml",
-  "video/3gpp",
-  "video/3gpp2",
-  "video/h261",
-  "video/h263",
-  "video/h264",
-  "video/jpeg",
-  "video/mp4",
-  "video/mpeg",
-  "video/ogg",
-  "video/quicktime",
-  "video/vnd.mpegurl",
-  "video/vnd.ms-playready.media.pyv",
-  "video/vnd.uvvu.mp4",
-  "video/vnd.vivo",
-  "video/webm",
-  "video/x-f4v",
-  "video/x-fli",
-  "video/x-flv",
-  "video/x-m4v",
-  "video/x-matroska",
-  "video/x-mng",
-  "video/x-ms-asf",
-  "video/x-ms-vob",
-  "video/x-ms-wm",
-  "video/x-ms-wmv",
-  "video/x-ms-wmx",
-  "video/x-ms-wvx",
-  "video/x-msvideo",
-  "video/x-sgi-movie",
-  "x-conference/x-cooltalk",
-]);
+
 
 function isHighEntropy(str: string, threshold = 4.9): boolean {
   const freq: Record<string, number> = {};
@@ -240,73 +27,7 @@ function isHighEntropy(str: string, threshold = 4.9): boolean {
 
 export const ROBUST_PATHS_ANALYZER_NAME = "robust-paths";
 
-// Common file extensions that should be tagged as extensions
-const FILE_EXTENSIONS = new Set([
-  ".js",
-  ".jsx",
-  ".ts",
-  ".tsx",
-  ".json",
-  ".html",
-  ".css",
-  ".scss",
-  ".less",
-  ".png",
-  ".jpg",
-  ".jpeg",
-  ".gif",
-  ".svg",
-  ".ico",
-  ".webp",
-  ".mp3",
-  ".mp4",
-  ".wav",
-  ".ogg",
-  ".webm",
-  ".pdf",
-  ".doc",
-  ".docx",
-  ".xls",
-  ".xlsx",
-  ".ppt",
-  ".pptx",
-  ".zip",
-  ".tar",
-  ".gz",
-  ".rar",
-  ".7z",
-  ".md",
-  ".txt",
-  ".csv",
-  ".xml",
-  ".yaml",
-  ".yml",
-  ".env",
-  ".config",
-  ".conf",
-  ".ini",
-  ".sh",
-  ".bash",
-  ".zsh",
-  ".fish",
-  ".py",
-  ".rb",
-  ".php",
-  ".java",
-  ".c",
-  ".cpp",
-  ".go",
-  ".rs",
-  ".sql",
-  ".db",
-  ".sqlite",
-  ".sqlite3",
-  ".log",
-  ".lock",
-  ".map",
-  ".min",
-  ".bundle",
-]);
+
 
 const hostnamesToExclude = new Set(["www.w3.org", "reactjs.org"]);
 
@@ -430,7 +151,7 @@ function isValidPath(value: string): boolean {
     ) {
       return false;
     }
-  } catch {}
+  } catch { }
 
   // For relative paths, check if they have a valid structure
   if (parts.length === 0) {
@@ -527,11 +248,12 @@ function processStringConcatenation(node: Node): string {
 
 function createPathMatch(
   args: AnalyzerParams,
-  node: Node,
+  path: NodePath<any>,
   value: string,
   isTemplate = false,
   processedValue: string
 ): AnalyzerMatch {
+  const node = path.node
   let isUrl = processedValue.includes("://") || processedValue.startsWith("//");
   let isUrlOnly = false;
 
@@ -553,7 +275,7 @@ function createPathMatch(
     } else {
       parsedUrl = new URL(processedValue, "http://randombase.com");
     }
-  } catch {}
+  } catch { }
 
   if (
     isUrl &&
@@ -638,67 +360,73 @@ const robustPathsAnalyzerBuilder = (
   args: AnalyzerParams,
   matchesReturn: AnalyzerMatch[]
 ): Visitor => {
-  return {
-    Literal(node, ancestors) {
-      if (!node.loc || typeof (node as Literal).value !== "string") {
-        return;
-      }
 
-      if (ancestors.some((a) => a.type === "ImportDeclaration")) {
-        return;
-      }
+  // du type "/api/admin/id"
+  const handleStringLiteral = (path: NodePath<t.StringLiteral>) => {
+    const node = path.node;
+    if (!node.loc || node.start == null || node.end == null) return;
 
-      const value = (node as Literal).value;
-      if (isValidPath(value)) {
-        matchesReturn.push(createPathMatch(args, node, value, false, value));
-      }
-    },
+    if (path.findParent(p => p.isImportDeclaration())) return;
 
-    TemplateLiteral(node) {
-      if (!node.loc) {
-        return;
-      }
+    if (isValidPath(node.value)) {
+      matchesReturn.push(createPathMatch(args, path, node.value, false, node.value));
+    }
+  };
 
-      // Get the raw template literal value and process expressions
-      const rawValue = args.source
-        .slice(node.start, node.end)
-        .replaceAll("`", "");
-      const processedValue = processTemplateLiteral(rawValue);
+  // du type "/admin/${e}/id"
+  const handleTemplateLiteral = (path: NodePath<t.TemplateLiteral>) => {
+    const node = path.node;
+    if (!node.loc || node.start == null || node.end == null) return;
 
+    const processedValueEval = path.evaluate()
+    let processedValue = ""
+    if (processedValueEval.confident == true) { processedValue = processedValueEval.value }
+    else {
+      processedValue = node.quasis.map(q => {
+        return q.value.cooked ?? q.value.raw
+      }).join("EXPR")
+    }
+    // Get the raw template literal value and process expressions
+    const rawValue = args.source
+      .slice(node.start, node.end)
+      .replaceAll("`", "");
+
+    if (isValidPath(processedValue)) {
+      matchesReturn.push(
+        createPathMatch(args, path, rawValue, true, processedValue)
+      );
+    }
+  };
+
+  BinaryExpression(node) {
+    const binaryNode = node as BinaryExpression;
+    if (binaryNode.operator === "+") {
+      const processedValue = processStringConcatenation(node);
       if (isValidPath(processedValue)) {
         matchesReturn.push(
-          createPathMatch(args, node, rawValue, true, processedValue)
+          createPathMatch(args, node, processedValue, false, processedValue)
         );
       }
-    },
-
-    BinaryExpression(node) {
-      const binaryNode = node as BinaryExpression;
-      if (binaryNode.operator === "+") {
-        const processedValue = processStringConcatenation(node);
-        if (isValidPath(processedValue)) {
-          matchesReturn.push(
-            createPathMatch(args, node, processedValue, false, processedValue)
-          );
-        }
-      }
-    },
-
-    CallExpression(node) {
-      const callNode = node as CallExpression;
-      if (
-        callNode.callee.type === "MemberExpression" &&
-        callNode.callee.property.name === "concat"
-      ) {
-        const processedValue = processStringConcatenation(node);
-        if (isValidPath(processedValue)) {
-          matchesReturn.push(
-            createPathMatch(args, node, processedValue, false, processedValue)
-          );
-        }
-      }
-    },
+    }
   };
+
+  CallExpression(node) {
+    const callNode = node as CallExpression;
+    if (
+      callNode.callee.type === "MemberExpression" &&
+      callNode.callee.property.name === "concat"
+    ) {
+      const processedValue = processStringConcatenation(node);
+      if (isValidPath(processedValue)) {
+        matchesReturn.push(
+          createPathMatch(args, node, processedValue, false, processedValue)
+        );
+      }
+    }
+  }
+  return {}
 };
+}
+
 
 export { robustPathsAnalyzerBuilder };
