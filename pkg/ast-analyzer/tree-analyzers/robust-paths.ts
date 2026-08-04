@@ -2,6 +2,7 @@ import { AnalyzerMatch, AnalyzerParams } from "../types";
 import { NodePath, Visitor } from "@babel/traverse";
 import * as t from "@babel/types";
 import { COMMON_MIME_TYPES, FILE_EXTENSIONS } from "../constant/iana-tld";
+import { BinaryExpression } from "@babel/types";
 
 
 
@@ -186,62 +187,17 @@ function getFileExtension(url: URL | null): string | null {
   return FILE_EXTENSIONS.has(extension) ? extension.replace(".", "") : null;
 }
 
-function processTemplateLiteral(template: string): string {
-  return template.replace(/\${[^}]+}/g, "EXPR");
-}
-
-interface BinaryExpression extends Node {
-  type: "BinaryExpression";
-  operator: string;
-  left: Node;
-  right: Node;
-}
-
-interface CallExpression extends Node {
-  type: "CallExpression";
-  callee: {
-    type: "MemberExpression";
-    property: {
-      name: string;
-    };
-    object: Node;
-  };
-  arguments: Node[];
-}
-
-interface Literal extends Node {
-  type: "Literal";
-  value: string;
-}
-
-function processStringConcatenation(node: Node): string {
+function processStringConcatenation(node: t.BinaryExpression | t.CallExpression | t.StringLiteral): string {
+  if (!node) return "";
   if (
-    node.type === "BinaryExpression" &&
-    (node as BinaryExpression).operator === "+"
+    t.isBinaryExpression(node) &&
+    node.operator === "+"
   ) {
-    const binaryNode = node as BinaryExpression;
-    const left = processStringConcatenation(binaryNode.left);
-    const right = processStringConcatenation(binaryNode.right);
+    const left = processStringConcatenation(node.left as t.BinaryExpression);
+    const right = processStringConcatenation(node.right as t.BinaryExpression);
     return left + right;
-  } else if (node.type === "CallExpression") {
-    const callNode = node as CallExpression;
-    if (
-      callNode.callee.type === "MemberExpression" &&
-      callNode.callee.property.name === "concat"
-    ) {
-      const base = processStringConcatenation(callNode.callee.object);
-      const args = callNode.arguments
-        .map((arg) =>
-          arg.type === "Literal" ? (arg as Literal).value : "EXPR"
-        )
-        .join("");
-      return base + args;
-    }
-  } else if (
-    node.type === "Literal" &&
-    typeof (node as Literal).value === "string"
-  ) {
-    return (node as Literal).value;
+  } else if (t.isStringLiteral(node)) {
+    return node.value
   }
   return "EXPR";
 }
@@ -379,7 +335,7 @@ const robustPathsAnalyzerBuilder = (
     if (!node.loc || node.start == null || node.end == null) return;
 
     const processedValueEval = path.evaluate()
-    let processedValue = ""
+    let processedValue
     if (processedValueEval.confident == true) { processedValue = processedValueEval.value }
     else {
       processedValue = node.quasis.map(q => {
@@ -398,35 +354,54 @@ const robustPathsAnalyzerBuilder = (
     }
   };
 
-  BinaryExpression(node) {
-    const binaryNode = node as BinaryExpression;
-    if (binaryNode.operator === "+") {
-      const processedValue = processStringConcatenation(node);
+  const handleBinaryExpression = (path: NodePath<BinaryExpression>) => {
+    const node = path.node
+
+    if (node.operator === "+") {
+      let processedValue
+      const processedValueEval = path.evaluate()
+      if (processedValueEval.confident == true) { processedValue = processedValueEval.value }
+      else {
+        processedValue = processStringConcatenation(node)
+      }
       if (isValidPath(processedValue)) {
         matchesReturn.push(
-          createPathMatch(args, node, processedValue, false, processedValue)
+          createPathMatch(args, path, processedValue, false, processedValue)
         );
+        path.skip()
       }
     }
   };
 
-  CallExpression(node) {
-    const callNode = node as CallExpression;
-    if (
-      callNode.callee.type === "MemberExpression" &&
-      callNode.callee.property.name === "concat"
-    ) {
-      const processedValue = processStringConcatenation(node);
+  const handleCallExpression = (path: NodePath<t.CallExpression | t.OptionalCallExpression>) => {
+    const node = path.node
+
+    if  (!t.isMemberExpression(node.callee) && !t.isOptionalMemberExpression(node.callee)) return;
+    const isConcatCallExpr = 
+        ((t.isIdentifier(node.callee.property, {name: "concat"}) && !node.callee.computed) || t.isStringLiteral(node.callee.property, {value: "concat"}))
+
+    if (isConcatCallExpr) {
+      let processedValue
+      const processedValueEval = path.evaluate()
+      if (processedValueEval.confident == true) { processedValue = processedValueEval.value }
+      else {
+        const base  = t.isStringLiteral(node.callee.object) ? node.callee.object.value: "EXPR"
+        const argumentStr = node.arguments.map(a => {
+          return t.isStringLiteral(a) ? a.value : "EXPR"
+        }).join("")
+        processedValue = base + argumentStr
+      }
       if (isValidPath(processedValue)) {
         matchesReturn.push(
-          createPathMatch(args, node, processedValue, false, processedValue)
+          createPathMatch(args, path, processedValue, false, processedValue)
         );
+        path.skip()//trick de claudo qui permet de ne pas répéter une valeur déjà vue.
       }
     }
   }
-  return {}
+  return {StringLiteral: handleStringLiteral, TemplateLiteral: handleTemplateLiteral, BinaryExpression: handleBinaryExpression, CallExpression: handleCallExpression, OptionalCallExpression: handleCallExpression}
 };
-}
+
 
 
 export { robustPathsAnalyzerBuilder };

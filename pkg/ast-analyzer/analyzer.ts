@@ -2,8 +2,7 @@ import fs from "fs";
 
 import Bun from "bun"
 import * as parser from "@babel/parser";
-import traverse, { NodePath } from "@babel/traverse";
-import cache from "@babel/traverse";
+import traverse from "@babel/traverse";
 import { File } from '@babel/types';
 
 import { AnalyzerParams, AnalyzerMatch } from "./types";
@@ -35,7 +34,7 @@ import { httpMethodsAnalyzerBuilder } from "./tree-analyzers/http-methods";
 export async function parseFile(filePath: string): Promise<AnalyzerParams> {
   const file = Bun.file(filePath);
   const fileContent = await file.text()  
-  let fileExtension = filePath.split('.').pop()
+  const fileExtension = filePath.split('.').pop()
   let ast: parser.ParseResult<File>
   
   switch(fileExtension) {
@@ -231,7 +230,7 @@ export async function analyzeFile(
     onmessageAnalyzer,// done
     regexMatchAnalyzer,// done
     urlSearchParamsAnalyzer,// done
-    robustPathsAnalyzer,
+    robustPathsAnalyzer,//done
     windowNameAnalyzer,
     windowOpenAnalyzer,
     dangerousHtmlAnalyzer,
