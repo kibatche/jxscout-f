@@ -127,6 +127,7 @@ export async function analyzeFile(
   const results: AnalyzerMatch[] = [];
   const args = await parseFile(filePath);
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const createAnalyzer = <T extends { [key: string]: any }>(
     type: AnalyzerType,
     builder: (args: AnalyzerParams, results: AnalyzerMatch[]) => T
@@ -231,9 +232,9 @@ export async function analyzeFile(
     regexMatchAnalyzer,// done
     urlSearchParamsAnalyzer,// done
     robustPathsAnalyzer,//done
-    windowNameAnalyzer,
-    windowOpenAnalyzer,
-    dangerousHtmlAnalyzer,
+    windowNameAnalyzer,//done
+    windowOpenAnalyzer,//done
+    dangerousHtmlAnalyzer,//done
     httpMethodsAnalyzer
   ].filter((visitor) => visitor != null);
   // tip de claudo : permet de merge le tableau d'analyzer, en une seule passe et une seul ligne.

@@ -1,6 +1,6 @@
-import { Node } from "acorn";
-import { Analyzer, AnalyzerMatch, AnalyzerParams } from "../types";
-import { Visitor } from "@babel/traverse";
+import { AnalyzerMatch, AnalyzerParams } from "../types";
+import { NodePath, Visitor } from "@babel/traverse";
+import * as t from "@babel/types";
 
 export const DANGEROUS_HTML_ANALYZER_NAME = "dangerouslySetInnerHTML";
 
@@ -8,24 +8,25 @@ const dangerousHtmlAnalyzerBuilder = (
   args: AnalyzerParams,
   matchesReturn: AnalyzerMatch[]
 ): Visitor => {
-  return {
     // Handle object properties
-    ObjectExpression(node, ancestors) {
-      if (!node.loc) {
-        return;
-      }
+    const handleObjectExpression = (path: NodePath<t.ObjectExpression>) => {
+      const node = path.node;
+      if (!node.loc || node.start == null || node.end == null) return;
+      if (node.properties.length < 1) return;
 
-      // Get all property names in this object
-      const propertyNames = new Set(
-        node.properties
-          .filter(
-            (prop) => prop.type === "Property" && prop.key.type === "Identifier"
-          )
-          .map((prop) => (prop as any).key.name)
-      );
+      let isDangerouslySetInnerHTML = false
+      
+      node.properties.forEach(p => {
+        if (t.isObjectProperty(p)
+          && ((!p.computed && t.isIdentifier(p.key, {name: "dangerouslySetInnerHTML"}))
+            || t.isStringLiteral(p.key, {value: "dangerouslySetInnerHTML"})))
+        {
+          return isDangerouslySetInnerHTML = true;
+        }
+      })
 
       // Check if this object has dangerouslySetInnerHTML property
-      if (propertyNames.has("dangerouslySetInnerHTML")) {
+      if (isDangerouslySetInnerHTML) {
         const tags: Record<string, true> = {
           "dangerouslySetInnerHTML-object": true,
         };
@@ -41,23 +42,24 @@ const dangerousHtmlAnalyzerBuilder = (
 
         matchesReturn.push(match);
       }
-    },
+    }
 
     // Handle JSX elements
-    JSXElement(node, ancestors) {
-      if (!node.loc) {
-        return;
-      }
+    const handleJSXElement = (path: NodePath<t.JSXElement>) => {
+      const node = path.node;
+      if (!node.loc || node.start == null || node.end == null) return;
 
-      // Check if any of the JSX attributes is dangerouslySetInnerHTML
-      const hasDangerousHtml = node.openingElement.attributes.some(
-        (attr) =>
-          attr.type === "JSXAttribute" &&
-          attr.name.type === "JSXIdentifier" &&
-          attr.name.name === "dangerouslySetInnerHTML"
-      );
+      let isDangerouslySetInnerHTML = false
+  
+      node.openingElement.attributes.forEach(a => {
+        if (t.isJSXAttribute(a) 
+          && t.isJSXIdentifier(a.name, {name: "dangerouslySetInnerHTML"}))
+        {
+          return isDangerouslySetInnerHTML = true
+        }
+      })
 
-      if (hasDangerousHtml) {
+      if (isDangerouslySetInnerHTML) {
         const tags: Record<string, true> = {
           "dangerouslySetInnerHTML-jsx": true,
         };
@@ -73,8 +75,9 @@ const dangerousHtmlAnalyzerBuilder = (
 
         matchesReturn.push(match);
       }
-    },
+    }
+    return {ObjectExpression: handleObjectExpression, JSXElement: handleJSXElement}
   };
-};
+
 
 export { dangerousHtmlAnalyzerBuilder };

@@ -26,9 +26,10 @@ const hostnameAnalyzerBuilder = (
 
       // Check if the string literal matches the hostname pattern
       if (HOSTNAME_REGEX.test(node.value)) {
-        let parsedUrl: URL | null = null;
+        let parsedUrl: URL | null
         // ajout d'un vrai check de hostname via la lite IANA. Elimine énormément de bruit.
-        if (!IANA_TLD.has(node.value.split(".").at(-1)?.toUpperCase()!)) return;
+        const h = node.value.split(".").at(-1)?.toUpperCase()
+        if (!h || !IANA_TLD.has(h)) return;
         try {
           parsedUrl = new URL(`https://${node.value}`);
         } catch {

@@ -40,7 +40,7 @@ function hasPrefix(str: string, prefix: string): boolean {
   return str.startsWith(prefix);
 }
 
-function isValidPath(value: string): boolean {
+export function isValidPath(value: string): boolean {
   // Check if path starts with a letter or forward slash
   if (!/^[a-zA-Z/]/.test(value)) {
     return false;
@@ -152,7 +152,7 @@ function isValidPath(value: string): boolean {
     ) {
       return false;
     }
-  } catch { }
+  } catch (e) { void e }
 
   // For relative paths, check if they have a valid structure
   if (parts.length === 0) {
@@ -204,6 +204,7 @@ function processStringConcatenation(node: t.BinaryExpression | t.CallExpression 
 
 function createPathMatch(
   args: AnalyzerParams,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   path: NodePath<any>,
   value: string,
   isTemplate = false,
@@ -231,7 +232,7 @@ function createPathMatch(
     } else {
       parsedUrl = new URL(processedValue, "http://randombase.com");
     }
-  } catch { }
+  } catch (e) { void e }
 
   if (
     isUrl &&
@@ -259,6 +260,7 @@ function createPathMatch(
 
   const isPathOnly = !isUrl && !isMimeType;
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const extra: Record<string, any> = {};
 
   if (parsedUrl) {
@@ -312,6 +314,30 @@ function createPathMatch(
   };
 }
 
+export function getTemplateLiteralStr(node: t.TemplateLiteral) {
+  return node.quasis.map(q => {
+    return q.value.cooked ?? q.value.raw
+  }).join("EXPR")
+}
+
+export function getBinaryExpressionStr(node: t.BinaryExpression) {
+  return processStringConcatenation(node)
+}
+
+export function isConcatCallExpr(node: t.CallExpression | t.OptionalCallExpression) {
+  if (!t.isMemberExpression(node.callee) && !t.isOptionalMemberExpression(node.callee)) return false;
+  return ((t.isIdentifier(node.callee.property, { name: "concat" }) && !node.callee.computed) || t.isStringLiteral(node.callee.property, { value: "concat" }))
+}
+
+export function getConcatCallExprStr(node: t.CallExpression | t.OptionalCallExpression) {
+  if (!t.isMemberExpression(node.callee) && !t.isOptionalMemberExpression(node.callee)) return "";
+  const base = t.isStringLiteral(node.callee.object) ? node.callee.object.value : "EXPR"
+  const argumentStr = node.arguments.map(a => {
+    return t.isStringLiteral(a) ? a.value : "EXPR"
+  }).join("")
+  return base + argumentStr
+}
+
 const robustPathsAnalyzerBuilder = (
   args: AnalyzerParams,
   matchesReturn: AnalyzerMatch[]
@@ -338,15 +364,12 @@ const robustPathsAnalyzerBuilder = (
     let processedValue
     if (processedValueEval.confident == true) { processedValue = processedValueEval.value }
     else {
-      processedValue = node.quasis.map(q => {
-        return q.value.cooked ?? q.value.raw
-      }).join("EXPR")
+      processedValue = getTemplateLiteralStr(node)
     }
     // Get the raw template literal value and process expressions
     const rawValue = args.source
       .slice(node.start, node.end)
       .replaceAll("`", "");
-
     if (isValidPath(processedValue)) {
       matchesReturn.push(
         createPathMatch(args, path, rawValue, true, processedValue)
@@ -362,7 +385,7 @@ const robustPathsAnalyzerBuilder = (
       const processedValueEval = path.evaluate()
       if (processedValueEval.confident == true) { processedValue = processedValueEval.value }
       else {
-        processedValue = processStringConcatenation(node)
+        processedValue = getBinaryExpressionStr(node)
       }
       if (isValidPath(processedValue)) {
         matchesReturn.push(
@@ -376,20 +399,14 @@ const robustPathsAnalyzerBuilder = (
   const handleCallExpression = (path: NodePath<t.CallExpression | t.OptionalCallExpression>) => {
     const node = path.node
 
-    if  (!t.isMemberExpression(node.callee) && !t.isOptionalMemberExpression(node.callee)) return;
-    const isConcatCallExpr = 
-        ((t.isIdentifier(node.callee.property, {name: "concat"}) && !node.callee.computed) || t.isStringLiteral(node.callee.property, {value: "concat"}))
+    if (!t.isMemberExpression(node.callee) && !t.isOptionalMemberExpression(node.callee)) return;
 
-    if (isConcatCallExpr) {
+    if (isConcatCallExpr(node)) {
       let processedValue
       const processedValueEval = path.evaluate()
       if (processedValueEval.confident == true) { processedValue = processedValueEval.value }
       else {
-        const base  = t.isStringLiteral(node.callee.object) ? node.callee.object.value: "EXPR"
-        const argumentStr = node.arguments.map(a => {
-          return t.isStringLiteral(a) ? a.value : "EXPR"
-        }).join("")
-        processedValue = base + argumentStr
+        processedValue = getConcatCallExprStr(node)
       }
       if (isValidPath(processedValue)) {
         matchesReturn.push(
@@ -399,7 +416,7 @@ const robustPathsAnalyzerBuilder = (
       }
     }
   }
-  return {StringLiteral: handleStringLiteral, TemplateLiteral: handleTemplateLiteral, BinaryExpression: handleBinaryExpression, CallExpression: handleCallExpression, OptionalCallExpression: handleCallExpression}
+  return { StringLiteral: handleStringLiteral, TemplateLiteral: handleTemplateLiteral, BinaryExpression: handleBinaryExpression, CallExpression: handleCallExpression, OptionalCallExpression: handleCallExpression }
 };
 
 
